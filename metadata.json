@@ -1,0 +1,6 @@
+{
+  "name": "대진전자통신고 스마트 시간표 & 과제 알리미",
+  "description": "대진전자통신고등학교 학생을 위한 NEIS 공공데이터 실시간 시간표 조회, 과제 등록 관리 및 마감 기한 푸시 알림 서비스",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
