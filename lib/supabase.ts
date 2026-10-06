@@ -39,6 +39,7 @@ export interface AuthUser {
   email: string;
   user_metadata?: {
     full_name?: string;
+    user_name?: string;
     avatar_url?: string;
     provider?: string;
   };
@@ -49,6 +50,14 @@ export class SupabaseService {
   // Check auth user
   static async getCurrentUser(): Promise<AuthUser | null> {
     if (isRealSupabaseConfigured && supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        return {
+          id: session.user.id,
+          email: session.user.email || '',
+          user_metadata: session.user.user_metadata,
+        };
+      }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
       return {
@@ -69,105 +78,18 @@ export class SupabaseService {
     }
   }
 
-  // Sign in with Email Magic Link / OTP
-  static async signInWithEmail(email: string): Promise<{ success: boolean; message: string; otpSent?: boolean }> {
+  // Sign in with GitHub OAuth
+  static async signInWithGithub(): Promise<{ success: boolean; url?: string; message?: string }> {
     if (isRealSupabaseConfigured && supabase) {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-        },
-      });
-      if (error) {
-        return { success: false, message: error.message };
-      }
-      return {
-        success: true,
-        message: `${email} 주소로 인증 메일이 발송되었습니다. 메일함의 링크를 클릭하거나 인증코드를 확인해주세요.`,
-        otpSent: true,
-      };
-    }
+      const redirectUrl = typeof window !== 'undefined'
+        ? `${window.location.origin}/auth/callback`
+        : undefined;
 
-    // Local Sandbox Simulation
-    if (typeof window !== 'undefined') {
-      const demoUser: AuthUser = {
-        id: `mock-user-${Math.random().toString(36).substring(2, 9)}`,
-        email,
-        user_metadata: {
-          full_name: email.split('@')[0],
-          provider: 'email',
-        },
-      };
-      localStorage.setItem('daejin_pending_email_user', JSON.stringify(demoUser));
-      // Generate a mock OTP code for instant preview testing
-      const mockCode = '123456';
-      localStorage.setItem('daejin_pending_otp', mockCode);
-      return {
-        success: true,
-        message: `인증 메일이 발송되었습니다. [테스트용 인증코드: 123456]`,
-        otpSent: true,
-      };
-    }
-
-    return { success: false, message: '클라이언트 환경이 아닙니다.' };
-  }
-
-  // Verify Email OTP
-  static async verifyEmailOtp(email: string, token: string): Promise<{ success: boolean; user?: AuthUser; message?: string }> {
-    if (isRealSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token,
-        type: 'email',
-      });
-      if (error || !data.user) {
-        return { success: false, message: error?.message || '인증에 실패했습니다.' };
-      }
-      return {
-        success: true,
-        user: {
-          id: data.user.id,
-          email: data.user.email || email,
-          user_metadata: data.user.user_metadata,
-        },
-      };
-    }
-
-    // Local Sandbox
-    if (typeof window !== 'undefined') {
-      const storedPending = localStorage.getItem('daejin_pending_email_user');
-      const storedOtp = localStorage.getItem('daejin_pending_otp');
-
-      if (token === storedOtp || token === '123456' || token.length === 6) {
-        let user: AuthUser;
-        if (storedPending) {
-          user = JSON.parse(storedPending);
-        } else {
-          user = {
-            id: 'demo-student-daejin-01',
-            email,
-            user_metadata: { full_name: '대진고 재학생', provider: 'email' },
-          };
-        }
-        localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
-        localStorage.removeItem('daejin_pending_email_user');
-        localStorage.removeItem('daejin_pending_otp');
-        return { success: true, user };
-      } else {
-        return { success: false, message: '인증코드가 올바르지 않습니다. (테스트용: 123456)' };
-      }
-    }
-
-    return { success: false, message: '인증 오류가 발생했습니다.' };
-  }
-
-  // Sign in with Google
-  static async signInWithGoogle(): Promise<{ success: boolean; url?: string; message?: string }> {
-    if (isRealSupabaseConfigured && supabase) {
       const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
+        provider: 'github',
         options: {
-          redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/` : undefined,
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: true,
         },
       });
       if (error) return { success: false, message: error.message };
@@ -176,17 +98,18 @@ export class SupabaseService {
 
     // Local Sandbox Simulation
     if (typeof window !== 'undefined') {
-      const mockGoogleUser: AuthUser = {
-        id: 'google-user-7150597',
-        email: 'daejin.student@gmail.com',
+      const mockGithubUser: AuthUser = {
+        id: 'github-user-7150597',
+        email: 'daejin.tech@github.com',
         user_metadata: {
-          full_name: '김대진',
-          provider: 'google',
+          full_name: '김대진 (GitHub)',
+          user_name: 'daejin-electronics',
+          provider: 'github',
           avatar_url: '/images/avatar_student_default_1791256196104.jpg',
         },
       };
-      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(mockGoogleUser));
-      return { success: true, message: '구글 계정으로 로그인되었습니다.' };
+      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(mockGithubUser));
+      return { success: true, message: 'GitHub 계정으로 로그인되었습니다.' };
     }
 
     return { success: false, message: '로그인 실패' };
@@ -195,11 +118,12 @@ export class SupabaseService {
   // Quick Demo / Reviewer Login
   static async quickDemoLogin(type: 'new' | 'existing' = 'existing'): Promise<AuthUser> {
     const demoUser: AuthUser = {
-      id: type === 'new' ? `student-${Date.now()}` : 'student-daejin-demo',
-      email: type === 'new' ? 'newbie@pdj.hs.kr' : 'student@pdj.hs.kr',
+      id: type === 'new' ? `student-gh-${Date.now()}` : 'student-daejin-github',
+      email: type === 'new' ? 'newbie.gh@pdj.hs.kr' : 'student.gh@pdj.hs.kr',
       user_metadata: {
-        full_name: type === 'new' ? '신규 학생' : '이민우 (2학년 3반)',
-        provider: 'email',
+        full_name: type === 'new' ? '신규 학생 (GitHub)' : '이민우 (2학년 3반)',
+        user_name: 'minwoo-daejin',
+        provider: 'github',
       },
     };
     if (typeof window !== 'undefined') {
